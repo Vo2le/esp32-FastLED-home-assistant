@@ -7,6 +7,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include "PubSubClient.h"
+#define FASTLED_ALLOW_INTERRUPTS 0
 #include "FastLED.h"
 
 
@@ -34,7 +35,15 @@ CRGB leds[NUM_LEDS];
  * Multithreading
  */
 typedef struct{
-  byte *payload;
+  int state;
+  int hasColor;
+  int color_r;
+  int color_g;
+  int color_b;
+  int hasBrightness;
+  int brightness;
+  int hasEffect;
+  char * effect;
 }Data;
 /* this variable hold queue handle */
 xQueueHandle xQueue;
@@ -77,9 +86,49 @@ void callback(char* topic, byte* payload, unsigned int length) {
   const TickType_t xTicksToWait = pdMS_TO_TICKS(10);
   Data data;
 
-  data.payload = (byte *)malloc(256);
-  memset(data.payload, 0, 256);
-  memcpy(data.payload, payload, length);
+  StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
+  JsonObject& parsed = JSONBuffer.parseObject(payload);
+
+  data.state = 0;
+  //state
+  if(parsed["state"] == "ON")
+    data.state = 1;
+  
+  //color
+  if(parsed.containsKey("color")) {
+    data.color_r = parsed["color"]["r"];
+    data.color_g = parsed["color"]["g"];
+    data.color_b = parsed["color"]["b"];
+    
+    data.hasColor = 1;
+  } else {
+    data.hasColor = 0;
+  }
+  
+  //brightness
+  if(parsed.containsKey("brightness")) {
+    data.brightness = parsed["brightness"];
+    data.hasBrightness = 1;
+  } else {
+    data.hasBrightness = 0;
+  }
+  
+  //effect
+  if(parsed.containsKey("effect")) {
+    const char * tmpEffect = parsed["effect"];
+    char * effect = strdup(tmpEffect);
+    data.effect = (char *)malloc(32);
+    memset(data.effect, 0, 32);
+    memcpy(data.effect, effect, strlen(effect));    
+    data.hasEffect = 1;
+  } else {
+    data.hasEffect = 0;
+  }
+
+
+
+
+
   
   /* send data to front of the queue */
   xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
@@ -117,7 +166,7 @@ void reconnect() {
 
 
 void setup() {
-  delay(2000);
+  delay(100);
   Serial.begin(115200);
   
   /* create the queue which size can contains 5 elements of Data */
@@ -176,7 +225,7 @@ bool state = false;
 
 CRGB oldColor = CRGB(0, 0, 0);
 CRGB currentColor = CRGB(0, 0, 0);
-CRGB newColor = CRGB(0, 0, 0);
+CRGB newColor = CRGB(255, 255, 255);
 int currentBrightness = 0;
 int newBrightness = 128;
 
@@ -197,7 +246,7 @@ void ledTask( void * parameter )
   /* keep the status of receiving data */
   BaseType_t xStatus;
   /* time to block the task until data is available */
-  const TickType_t xTicksToWait = pdMS_TO_TICKS(1);
+  const TickType_t xTicksToWait = pdMS_TO_TICKS(0);
   Data data;
   for(;;){
     /* receive data from the queue */
@@ -206,6 +255,17 @@ void ledTask( void * parameter )
     /* check whether receiving is ok or not */
     if(xStatus == pdPASS){
 
+/*
+      Serial.print(data.state);
+      Serial.print(" ");
+      Serial.print(data.hasColor);
+      Serial.print(" ");
+      Serial.print(data.hasBrightness);
+      Serial.print(" ");
+      Serial.println(data.hasEffect);
+*/
+
+/*
       StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
       JsonObject& parsed = JSONBuffer.parseObject(data.payload);
       free(data.payload);
@@ -213,33 +273,32 @@ void ledTask( void * parameter )
       //state
       if(parsed["state"] == "ON")
         state = true;
-      
+*/
       //color
-      if(parsed.containsKey("color")) {
+      if(data.hasColor == 1) {
         oldColor = currentColor;
-        newColor = CRGB(parsed["color"]["r"], parsed["color"]["g"], parsed["color"]["b"]);
+        newColor = CRGB(data.color_r, data.color_g, data.color_b);
         colorTransition = 0;
       }
       
       //brightness
-      if(parsed.containsKey("brightness")) {
-        newBrightness = parsed["brightness"];
+      if(data.hasBrightness == 1) {
+        newBrightness = data.brightness;
       }
       
       //effect
-      if(parsed.containsKey("effect")) {
-        const char * tmpEffect = parsed["effect"];
-        effect = strdup(tmpEffect);
+      if(data.hasEffect == 1) {
+        effect = data.effect;
         Serial.print("Effect changed");
         Serial.println(effect);
       }
-      
+
     }
 
     if(colorTransition < 255)
     {
       currentColor = blend(oldColor, newColor, colorTransition);
-      colorTransition = colorTransition + 20;
+      colorTransition = colorTransition + 2;
     } else {
       currentColor = newColor;
     }
@@ -258,7 +317,6 @@ void ledTask( void * parameter )
     } else if(strcmp(effect,"confetti") == 0) {
       fadeToBlackBy( leds, NUM_LEDS, 1);
       int pos = random16(NUM_LEDS);
-      EVERY_N_MILLISECONDS( 100 ) {gHue++;}
       leds[pos] += CHSV( gHue + random8(64), 200, currentBrightness);
     } else if(strcmp(effect,"rainbow") == 0) {
       fill_rainbow( leds, NUM_LEDS, gHue, 7);
@@ -269,8 +327,8 @@ void ledTask( void * parameter )
       }
     }
     
+    EVERY_N_MILLISECONDS( 100 ) {gHue++;}
     FastLED.show();
-    delay(1);
     
   }
 
