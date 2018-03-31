@@ -96,8 +96,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   data.state = 0;
   //state
-  if(parsed["state"] == "ON")
+  if(parsed["state"] == "ON"){
     data.state = 1;
+  } else if(parsed["state"] == "OFF"){
+    data.state = 2;
+  }
   
   //color
   if(parsed.containsKey("color")) {
@@ -314,7 +317,10 @@ void ledTask( void * parameter )
       currentBrightness = currentBrightness - 5;
     }
 
-    if(strcmp(effect,"sinelon") == 0) {
+    if(data.state == 2) {
+      // turn it out
+      fadeToBlackBy(leds, NUM_LEDS, 20);
+    } else if(strcmp(effect,"sinelon") == 0){
       fadeToBlackBy( leds, NUM_LEDS, 20);
       int pos = beatsin16( 13, 0, NUM_LEDS-1 );
       leds[pos] += currentColor;
