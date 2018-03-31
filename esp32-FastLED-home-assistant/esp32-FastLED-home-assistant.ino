@@ -18,6 +18,11 @@ const char* ssid     = "";
 const char* password = "";
 const char* mqtt_server = "";
 
+/*
+ * MQTT
+ */
+const char* mqtt_server = "";
+const char* mqtt_topic = "/esp32/ws281x/0/set";
 
 /*
  * FastLED
@@ -27,12 +32,10 @@ const char* mqtt_server = "";
 #define LED_TYPE  WS2812B
 //#define CLOCK_PIN 8
 
-
 /*
  * Performance
  */
 #define FRAMES_PER_SECOND 60
-
 
 CRGB leds[NUM_LEDS];
 
@@ -161,7 +164,7 @@ void reconnect() {
       // Once connected, publish an announcement...
       //client.publish("/woodie/ws281x/1/get", "hello world");
       // ... and resubscribe
-      client.subscribe("/woodie/ws281x/1/set");
+      client.subscribe(mqtt_topic);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
