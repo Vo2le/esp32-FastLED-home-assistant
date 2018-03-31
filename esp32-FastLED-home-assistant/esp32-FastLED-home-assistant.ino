@@ -28,8 +28,13 @@ const char* mqtt_server = "";
 //#define CLOCK_PIN 8
 
 
-CRGB leds[NUM_LEDS];
+/*
+ * Performance
+ */
+#define FRAMES_PER_SECOND 60
 
+
+CRGB leds[NUM_LEDS];
 
 /*
  * Multithreading
@@ -329,7 +334,7 @@ void ledTask( void * parameter )
     
     EVERY_N_MILLISECONDS( 100 ) {gHue++;}
     FastLED.show();
-    
+    FastLED.delay(1000 / FRAMES_PER_SECOND);
   }
 
   vTaskDelete( NULL );
