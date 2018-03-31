@@ -23,7 +23,7 @@ const char* mqtt_server = "";
  * FastLED
  */
 #define NUM_LEDS 122
-#define DATA_PIN  23
+#define DATA_PIN  25
 #define LED_TYPE  WS2812B
 //#define CLOCK_PIN 8
 
