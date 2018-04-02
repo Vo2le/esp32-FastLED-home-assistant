@@ -7,7 +7,6 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include "PubSubClient.h"
-//#define FASTLED_ALLOW_INTERRUPTS 0
 #include "FastLED.h"
 
 
@@ -20,13 +19,18 @@ const char* password = "";
 /*
  * MQTT
  */
-const char* mqtt_server = "";
-const char* mqtt_topic = "/esp32/ws281x/0/set";
+const char* mqtt_server = "192.168.4.1";
+const char* mqtt_topics[2] = {
+  "/esp32/ws281x/0/set",
+  "/esp32/ws281x/1/set"};
+
 
 /*
  * FastLED
  */
-#define STRIP_COUNT 1
+
+#define STRIP_COUNT 2
+#define STRIP_MAX_SIZE 100
 
 // Strip 0
 #define NUM_LEDS_0 284
@@ -38,7 +42,6 @@ const char* mqtt_topic = "/esp32/ws281x/0/set";
 #define DATA_PIN_1 2
 #define LED_TYPE_1 WS2812B
 //#define CLOCK_PIN_1 8
-
 
 /*
  * Performance
@@ -85,9 +88,9 @@ typedef struct {
   char * effect;
   int colorTransition;
 
-  uint8_t gHue;
-
   int count;
+  
+  byte heat[STRIP_MAX_SIZE];
 } LedState;
 
 
@@ -129,19 +132,19 @@ void callback(char* topic, byte* payload, unsigned int length) {
   StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
   JsonObject& parsed = JSONBuffer.parseObject(payload);
 
-  char string[strlen(topic)];
-  strcpy(string, topic);
+  //char string[strlen(topic)];
+  //strcpy(string, topic);
   char delimiter[] = "/";
   char *ptr;
   
-  ptr = strtok(string, delimiter);
-  strtok(NULL, delimiter);
-  strtok(NULL, delimiter);
+  strtok(topic, delimiter);
   strtok(NULL, delimiter);
   ptr = strtok(NULL, delimiter);
   Serial.print("LED found: ");
   Serial.println(ptr);
-  data.led = (int) ptr;
+  data.led = atoi(ptr);
+  Serial.print("As int: ");
+  Serial.println(data.led);
 
   data.state = 0;
   //state
@@ -181,11 +184,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   } else {
     data.hasEffect = 0;
   }
-
-
-
-
-
   
   /* send data to front of the queue */
   xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
@@ -210,7 +208,11 @@ void reconnect() {
       // Once connected, publish an announcement...
       //client.publish("/woodie/ws281x/1/get", "hello world");
       // ... and resubscribe
-      client.subscribe(mqtt_topic);
+      for(int i=0; i<STRIP_COUNT; i++){
+        client.subscribe(mqtt_topics[i]);
+        Serial.print("Subscribed to mqtt topic: ");
+        Serial.println(mqtt_topics[i]);
+      }
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -330,40 +332,38 @@ void loop_fire2012(LedState *ledstate, CRGB *leds)
 #define SPARKING 140
 
 
-void Fire2012WithPalette(LedState *ledstate, CRGB *leds)
-{
-  // Array of temperature readings at each simulation cell
-  byte heat[ledstate->count];
+void Fire2012WithPalette(LedState *ledstate, CRGB *leds){
+    // Array of temperature readings at each simulation cell
 
-  // Step 1.  Cool down every cell a little
+    // Step 1.  Cool down every cell a little
     for( int i = 0; i < ledstate->count; i++) {
-      heat[i] = qsub8( heat[i],  random8(0, ((COOLING * 10) / ledstate->count) + 2));
+      ledstate->heat[i] = qsub8(ledstate->heat[i],  random8(0, ((COOLING * 10) / ledstate->count) + 2));
     }
-
+  
     // Step 2.  Heat from each cell drifts 'up' and diffuses a little
-    for( int k= ledstate->count - 1; k >= 2; k--) {
-      heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
+    for( int k= (ledstate->count) - 1; k >= 2; k--) {
+      ledstate->heat[k] = (ledstate->heat[k - 1] + ledstate->heat[k - 2] + ledstate->heat[k - 2] ) / 3;
     }
-
+    
     // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
     if( random8() < SPARKING ) {
       int y = random8(7);
-      heat[y] = qadd8( heat[y], random8(160,255) );
+      ledstate->heat[y] = qadd8( ledstate->heat[y], random8(160,255) );
     }
 
     // Step 4.  Map from heat cells to LED colors
     for( int j = 0; j < ledstate->count; j++) {
       // Scale the heat value from 0-255 down to 0-240
       // for best results with color palettes.
-      byte colorindex = scale8( heat[j], 240);
+      byte colorindex = scale8(ledstate->heat[j], 240);
       CRGB color = ColorFromPalette(ledstate->gPal, colorindex);
       int pixelnumber;
       if( gReverseDirection ) {
-        pixelnumber = (ledstate->count-1) - j;
+        pixelnumber = ((ledstate->count)-1) - j;
       } else {
         pixelnumber = j;
       }
-      *(leds + pixelnumber) = color;
+      *(leds+pixelnumber) = color;
     }
 }
 
@@ -418,7 +418,7 @@ void communicationTask(void * parameter)
 }
 
 
-
+uint8_t gHue = 0;
 
 /*
  * parse received JSON and controll LED-Stripe
@@ -426,6 +426,7 @@ void communicationTask(void * parameter)
 
 void ledTask( void * parameter )
 {
+  
   LedState led_status[STRIP_COUNT];
   for(int i=0; i<STRIP_COUNT; i++){
     led_status[i].state = false;
@@ -436,9 +437,10 @@ void ledTask( void * parameter )
     led_status[i].newBrightness = 128;
     led_status[i].effect = "none";
     led_status[i].colorTransition = 0;
-    led_status[i].gHue = 0;
     led_status[i].count = 0;
   }
+
+  gHue = 0;
   
   FastLED.addLeds<LED_TYPE_0, DATA_PIN_0, GRB>(leds_0, NUM_LEDS_0).setCorrection(TypicalSMD5050);
   led_status[0].count = NUM_LEDS_0;
@@ -447,19 +449,23 @@ void ledTask( void * parameter )
     led_status[1].count = NUM_LEDS_1;
   }
 
-  /* keep the status of receiving data */
+  
+
+  // keep the status of receiving data
   BaseType_t xStatus;
-  /* time to block the task until data is available */
+  // time to block the task until data is available
   const TickType_t xTicksToWait = pdMS_TO_TICKS(0);
   Data data;
-  /* determinate the current led */
-  LedState strip_state;
+  // determinate the current led
+  LedState *strip_state;
   CRGB *leds;
+
+  
   for(;;){
-    /* receive data from the queue */
+    // receive data from the queue
     xStatus = xQueueReceive( xQueue, &data, xTicksToWait );
       
-    /* check whether receiving is ok or not */
+    // check whether receiving is ok or not 
     if(xStatus == pdPASS){
       // check if led is in range
       if(data.led >= STRIP_COUNT){
@@ -471,80 +477,94 @@ void ledTask( void * parameter )
         Serial.print(" strips are defined!");
         continue;
       } else {
-        strip_state = led_status[data.led];
+        strip_state = &led_status[data.led];
         if(data.led == 0)
           leds = leds_0;
         else if(data.led == 1)
           leds = leds_1;
       }
 
+
       //effect
       if(data.hasEffect == 1) {
-        strip_state.effect = data.effect;
-        Serial.print("Effect changed");
-        Serial.println(strip_state.effect);
+        strip_state->effect = data.effect;
+        Serial.print("Effect changed to: ");
+        Serial.println(strip_state->effect);
 
-        if(strcmp(strip_state.effect, "fire") == 0){
-          strip_state.gPal = CRGBPalette16(CRGB::Black, CRGB::Red, CRGB::White);
+        if(strcmp(strip_state->effect, "fire") == 0){
+          strip_state->gPal = CRGBPalette16(CRGB::Black, CRGB::Red, CRGB::White);
         }
       }
       
       //color
       if(data.hasColor == 1) {
-        strip_state.oldColor = strip_state.currentColor;
-        strip_state.newColor = CRGB(data.color_r, data.color_g, data.color_b);
-        strip_state.colorTransition = 0;
+        strip_state->oldColor = strip_state->currentColor;
+        strip_state->newColor = CRGB(data.color_r, data.color_g, data.color_b);
+        strip_state->colorTransition = 0;
+        Serial.print("Got new color: (R=");
+        Serial.print(data.color_r);
+        Serial.print("; G=");
+        Serial.print(data.color_g);
+        Serial.print("; B=");
+        Serial.print(data.color_b);
+        Serial.println(")");
 
-        if(strcmp(strip_state.effect, "fire") == 0){
-          strip_state.gPal = CRGBPalette16(CRGB::Black, strip_state.newColor, CRGB::White);
+        if(strcmp(strip_state->effect, "fire") == 0){
+          strip_state->gPal = CRGBPalette16(CRGB::Black, strip_state->newColor, CRGB::White);
         }
       }
       
       //brightness
       if(data.hasBrightness == 1) {
-        strip_state.newBrightness = data.brightness;
+        strip_state->newBrightness = data.brightness;
       }
     }
 
-    if(strip_state.colorTransition < 255)
-    {
-      strip_state.currentColor = blend(strip_state.oldColor, strip_state.newColor, strip_state.colorTransition);
-      strip_state.colorTransition = strip_state.colorTransition + 2;
-    } else {
-      strip_state.currentColor = strip_state.newColor;
-    }
-
-    if(strip_state.currentBrightness < strip_state.newBrightness - 5) {
-      strip_state.currentBrightness = strip_state.currentBrightness + 5;
-    } else if(strip_state.currentBrightness > strip_state.newBrightness + 5) {
-      strip_state.currentBrightness = strip_state.currentBrightness - 5;
-    }
-
-    if(data.state == 2) {
-      // turn it out
-      fadeToBlackBy(leds, strip_state.count, 20);
-    } else if(strcmp(strip_state.effect,"sinelon") == 0){
-      fadeToBlackBy(leds, strip_state.count, 20);
-      int pos = beatsin16(13, 0, strip_state.count-1 );
-      leds[pos] += strip_state.currentColor;
-      leds[pos] %= strip_state.currentBrightness;
-    } else if(strcmp(strip_state.effect,"confetti") == 0) {
-      fadeToBlackBy(leds, strip_state.count, 1);
-      int pos = random16(strip_state.count);
-      leds[pos] += CHSV(strip_state.gHue + random8(64), 200, strip_state.currentBrightness);
-    } else if(strcmp(strip_state.effect,"rainbow") == 0) {
-      fill_rainbow(leds, strip_state.count, strip_state.gHue, 7);  
-    } else if(strcmp(strip_state.effect,"fire") == 0) {
-      random16_add_entropy(esp_random());
-      Fire2012WithPalette(&strip_state, leds);
-    } else {
-      for (int i = 0; i < strip_state.count; i++) {
-          leds[i] = strip_state.currentColor;
-          leds[i] %= strip_state.currentBrightness;
+    for(int s=0; s<STRIP_COUNT; s++){
+      strip_state = &led_status[s];
+      if(s == 0)
+        leds = leds_0;
+      else if(s == 1)
+        leds = leds_1;
+          
+      if(strip_state->colorTransition < 255){
+        strip_state->currentColor = blend(strip_state->oldColor, strip_state->newColor, strip_state->colorTransition);
+        strip_state->colorTransition = strip_state->colorTransition + 2;
+      } else {
+        strip_state->currentColor = strip_state->newColor;
+      }   
+      if(strip_state->currentBrightness < strip_state->newBrightness - 5) {
+        strip_state->currentBrightness += 5;
+      } else if(strip_state->currentBrightness > strip_state->newBrightness + 5) {
+        strip_state->currentBrightness -= 5;
+      }
+      if(data.state == 2) {
+        // turn it out
+        fadeToBlackBy(leds, strip_state->count, 20);
+      } else if(strcmp(strip_state->effect,"sinelon") == 0){
+        fadeToBlackBy(leds, strip_state->count, 20);
+        int pos = beatsin16(13, 0, strip_state->count-1 );
+        *(leds+pos) += strip_state->currentColor;
+        *(leds+pos) %= strip_state->currentBrightness;
+      } else if(strcmp(strip_state->effect,"confetti") == 0) {
+        fadeToBlackBy(leds, strip_state->count, 1);
+        int pos = random16(strip_state->count);
+        *(leds+pos) += CHSV(gHue + random8(64), 200, strip_state->currentBrightness);
+      } else if(strcmp(strip_state->effect,"rainbow") == 0) {
+        fill_rainbow(leds, strip_state->count, gHue, 7);
+      } else if(strcmp(strip_state->effect, "fire") == 0) {
+        random16_add_entropy(esp_random());
+        Fire2012WithPalette(strip_state, leds);
+      } else {
+        for (int i = 0; i < strip_state->count; i++) {
+            *(leds+i) = strip_state->currentColor;
+            *(leds+i) %= strip_state->currentBrightness;
+        }
       }
     }
+  
+    EVERY_N_MILLISECONDS(100){gHue++;}
     
-    EVERY_N_MILLISECONDS( 100 ) {strip_state.gHue++;}
     FastLED.show();
     FastLED.delay(1000 / FRAMES_PER_SECOND);
   }
