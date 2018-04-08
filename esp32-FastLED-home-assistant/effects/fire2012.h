@@ -1,7 +1,7 @@
 #pragma once
 #include "FastLED.h"
 #pragma once
-#include "leddata.h"
+#include "../leddata.h"
 
 bool gReverseDirection = false;
 

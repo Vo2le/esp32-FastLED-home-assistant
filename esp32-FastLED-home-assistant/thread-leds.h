@@ -1,6 +1,6 @@
 #pragma once
 #include "FastLED.h"
-#include "fire2012.h"
+#include "effects/fire2012.h"
 #pragma once
 #include "leddata.h"
 
