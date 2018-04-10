@@ -12,7 +12,7 @@ TaskHandle_t xTask2;
 /*
  * Multithreading
  */
-typedef struct{
+struct Data {
   int led;
   int state;
   int hasColor;
@@ -22,13 +22,14 @@ typedef struct{
   int hasBrightness;
   int brightness;
   int hasEffect;
+  int hasBeat;
   char * effect;
-}Data;
+};
 
 /*
  * Color and Transition Values
  */
-typedef struct {
+struct LedState {
   CRGB oldColor;
   CRGB currentColor;
   CRGB newColor;
@@ -42,4 +43,4 @@ typedef struct {
   int count;
   
   byte heat[STRIP_MAX_SIZE];
-} LedState;
+};

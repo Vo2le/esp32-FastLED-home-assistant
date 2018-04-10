@@ -20,6 +20,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
   JsonObject& parsed = JSONBuffer.parseObject(payload);
 
+  if (!parsed.success()) {
+  Serial.println("[Comm-Thread] Parsing failed!!!");
+    return;
+  }
+
+/*
   //char string[strlen(topic)];
   //strcpy(string, topic);
   char delimiter[] = "/";
@@ -33,13 +39,21 @@ void callback(char* topic, byte* payload, unsigned int length) {
   data.led = atoi(ptr);
   Serial.print("As int: ");
   Serial.println(data.led);
+  */
 
-  data.state = 0;
+  data.led = 0;
+
   //state
-  if(parsed["state"] == "ON"){
-    data.state = 1;
-  } else if(parsed["state"] == "OFF"){
-    data.state = 2;
+  if(parsed.containsKey("state")){
+    if(parsed["state"] == "ON"){
+      data.state = 1;
+    } else if(parsed["state"] == "OFF"){
+      data.state = 2;
+    } else {
+      data.state = 0;
+    }
+  } else {
+    data.state = 0;
   }
   
   //color
@@ -59,6 +73,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
     data.hasBrightness = 1;
   } else {
     data.hasBrightness = 0;
+  }
+
+  //beat
+  if(parsed.containsKey("beat")) {
+    data.hasBeat = 1;
+  } else {
+    data.hasBeat = 0;
   }
   
   //effect

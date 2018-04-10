@@ -96,15 +96,24 @@ void ledTask( void * parameter )
         Serial.print("; B=");
         Serial.print(data.color_b);
         Serial.println(")");
-
-        if(strcmp(strip_state->effect, "fire") == 0){
-          strip_state->gPal = CRGBPalette16(CRGB::Black, strip_state->newColor, CRGB::White);
-        }
       }
       
       //brightness
       if(data.hasBrightness == 1) {
         strip_state->newBrightness = data.brightness;
+      }
+      
+      //beat
+      if(data.hasBeat == 1){
+        Serial.println("[Led-Thread] Adjustments");
+        if(strip_state->currentBrightness < 235) {
+          strip_state->currentBrightness += 20;
+          strip_state->newBrightness = strip_state->currentBrightness;
+          strip_state->newBrightness -= 20;
+          Serial.println("Beat");
+        } else {
+          Serial.println("Should beat but doesnt.");
+        }
       }
     }
 
@@ -126,6 +135,7 @@ void ledTask( void * parameter )
       } else if(strip_state->currentBrightness > strip_state->newBrightness + 5) {
         strip_state->currentBrightness -= 5;
       }
+      
       if(data.state == 2) {
         // turn it out
         fadeToBlackBy(leds, strip_state->count, 20);
