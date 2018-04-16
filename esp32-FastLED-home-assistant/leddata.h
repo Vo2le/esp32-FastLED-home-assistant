@@ -6,6 +6,7 @@
 
 /* this variable hold queue handle */
 xQueueHandle xQueue;
+xQueueHandle xQueueSend;
 TaskHandle_t xTask1;
 TaskHandle_t xTask2;
 
@@ -13,7 +14,14 @@ TaskHandle_t xTask2;
  * Multithreading
  */
 struct Data {
-  int led;
+  // type may be:
+  //  1: ws281x LEDs
+  //  2: relay
+  //  3: binary sensor
+  int type;
+  int hasNumber;
+  int number;
+  int hasState;
   int state;
   int hasColor;
   int color_r;

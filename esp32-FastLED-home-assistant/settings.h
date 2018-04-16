@@ -22,7 +22,6 @@ const char* mqtt_topics[2] = {
 /*
  * FastLED
  */
-
 #define STRIP_COUNT 2
 #define STRIP_MAX_SIZE 100
 

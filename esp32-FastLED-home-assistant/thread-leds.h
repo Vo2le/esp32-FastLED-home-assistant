@@ -56,22 +56,32 @@ void ledTask( void * parameter )
     // check whether receiving is ok or not 
     if(xStatus == pdPASS){
       // check if led is in range
-      if(data.led >= STRIP_COUNT){
+      if(data.number >= STRIP_COUNT){
         // led strip not defined
         Serial.print("Strip ");
-        Serial.print(data.led);
+        Serial.print(data.number);
         Serial.print(" addressed, but only ");
         Serial.print(STRIP_COUNT);
         Serial.print(" strips are defined!");
         continue;
       } else {
-        strip_state = &led_status[data.led];
-        if(data.led == 0)
+        strip_state = &led_status[data.number];
+        if(data.number == 0)
           leds = leds_0;
-        else if(data.led == 1)
+        else if(data.number == 1)
           leds = leds_1;
       }
 
+      //state
+      if(data.hasState == 1){
+        if(data.state == 0){
+          // turn it out
+          strip_state->newBrightness = 0;
+        } else if(data.hasBrightness == 0 && strip_state->newBrightness == 0){
+          // last brightness value
+          strip_state->newBrightness = 128;
+        }
+      }
 
       //effect
       if(data.hasEffect == 1) {
@@ -105,16 +115,37 @@ void ledTask( void * parameter )
       
       //beat
       if(data.hasBeat == 1){
-        Serial.println("[Led-Thread] Adjustments");
-        if(strip_state->currentBrightness < 235) {
-          strip_state->currentBrightness += 20;
+        if(strip_state->currentBrightness <= 235) {
           strip_state->newBrightness = strip_state->currentBrightness;
-          strip_state->newBrightness -= 20;
-          Serial.println("Beat");
+          strip_state->currentBrightness -= 10;
+          //Serial.println("Beat");
         } else {
           Serial.println("Should beat but doesnt.");
         }
       }
+
+      // send update to state topic
+      Data sendData = data;
+      if(data.hasState != 1){
+        if(data.hasBrightness){
+          if(data.brightness > 0){
+            sendData.hasState = 1;
+            sendData.state = 1;
+          }
+        }
+      }
+      sendData.type = 1;
+      sendData.hasBrightness = 1;
+      sendData.brightness = strip_state->newBrightness;
+      sendData.hasEffect = 1;
+      sendData.effect = strip_state->effect;
+      sendData.hasColor = 1;
+      sendData.color_r = strip_state->newColor.red;
+      sendData.color_g = strip_state->newColor.green;
+      sendData.color_b = strip_state->newColor.blue;
+          
+      /* send data to front of the queue */
+      xStatus = xQueueSendToFront( xQueueSend, &sendData, xTicksToWait );
     }
 
     for(int s=0; s<STRIP_COUNT; s++){
@@ -125,7 +156,7 @@ void ledTask( void * parameter )
         leds = leds_1;
           
       if(strip_state->colorTransition < 255){
-        strip_state->currentColor = blend(strip_state->oldColor, strip_state->newColor, strip_state->colorTransition);
+        strip_state->currentColor = blend(*leds, strip_state->newColor, strip_state->colorTransition);
         strip_state->colorTransition = strip_state->colorTransition + 2;
       } else {
         strip_state->currentColor = strip_state->newColor;
@@ -135,9 +166,8 @@ void ledTask( void * parameter )
       } else if(strip_state->currentBrightness > strip_state->newBrightness + 5) {
         strip_state->currentBrightness -= 5;
       }
-      
-      if(data.state == 2) {
-        // turn it out
+
+      if(strip_state->newBrightness == 0){
         fadeToBlackBy(leds, strip_state->count, 20);
       } else if(strcmp(strip_state->effect,"sinelon") == 0){
         fadeToBlackBy(leds, strip_state->count, 20);

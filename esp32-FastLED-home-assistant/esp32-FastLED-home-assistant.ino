@@ -13,8 +13,10 @@ void setup() {
   delay(100);
   Serial.begin(115200);
   
-  /* create the queue which size can contains 5 elements of Data */
+  // create the queue which size can contains 5 elements of Data
   xQueue = xQueueCreate(5, sizeof(Data));
+  // create the sending queue
+  xQueueSend = xQueueCreate(5, sizeof(Data));
 
   xTaskCreatePinnedToCore(
       communicationTask,           /* Task function. */

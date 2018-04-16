@@ -13,47 +13,51 @@ PubSubClient client(espClient);
 
 void callback(char* topic, byte* payload, unsigned int length) {
 
+  Serial.println("[Comm-Thread] Parsing package...");
+  Serial.print("[Comm-Thread] ");
+  Serial.print(topic);
+  Serial.print(": ");
+
   BaseType_t xStatus;
   const TickType_t xTicksToWait = pdMS_TO_TICKS(10);
   Data data;
 
   StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
   JsonObject& parsed = JSONBuffer.parseObject(payload);
+  parsed.printTo(Serial);
+  Serial.println("");
 
   if (!parsed.success()) {
-  Serial.println("[Comm-Thread] Parsing failed!!!");
+    Serial.println("[Comm-Thread] Parsing failed!!!");
     return;
   }
 
-/*
   //char string[strlen(topic)];
   //strcpy(string, topic);
   char delimiter[] = "/";
   char *ptr;
-  
+
+  data.hasNumber = 1;
   strtok(topic, delimiter);
   strtok(NULL, delimiter);
   ptr = strtok(NULL, delimiter);
   Serial.print("LED found: ");
   Serial.println(ptr);
-  data.led = atoi(ptr);
+  data.number = atoi(ptr);
   Serial.print("As int: ");
-  Serial.println(data.led);
-  */
-
-  data.led = 0;
+  Serial.println(data.number);
 
   //state
   if(parsed.containsKey("state")){
+    data.hasState = 1;
     if(parsed["state"] == "ON"){
       data.state = 1;
-    } else if(parsed["state"] == "OFF"){
-      data.state = 2;
     } else {
+      // OFF
       data.state = 0;
     }
   } else {
-    data.state = 0;
+    data.hasState = 0;
   }
   
   //color
@@ -69,7 +73,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   
   //brightness
   if(parsed.containsKey("brightness")) {
+    Serial.print("[Comm-Thread] New brightness: ");
     data.brightness = parsed["brightness"];
+    Serial.println(data.brightness);
     data.hasBrightness = 1;
   } else {
     data.hasBrightness = 0;
@@ -77,6 +83,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   //beat
   if(parsed.containsKey("beat")) {
+    Serial.println("[Comm-Thread] Beat detected");
     data.hasBeat = 1;
   } else {
     data.hasBeat = 0;
@@ -96,12 +103,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   
   /* send data to front of the queue */
   xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
-  
-//  /* check whether sending is ok or not */
-//  if( xStatus == pdPASS ) {
-//    /* increase counter of sender 1 */
-//  }
-  
 }
 
 void reconnect() {
@@ -114,10 +115,8 @@ void reconnect() {
     // Attempt to connect
     if (client.connect(clientId.c_str())) {
       Serial.println("connected");
-      // Once connected, publish an announcement...
-      //client.publish("/woodie/ws281x/1/get", "hello world");
       // ... and resubscribe
-      for(int i=0; i<STRIP_COUNT; i++){
+      for(int i=0; i < STRIP_COUNT + 1; i++){
         client.subscribe(mqtt_topics[i]);
         Serial.print("Subscribed to mqtt topic: ");
         Serial.println(mqtt_topics[i]);
@@ -151,6 +150,71 @@ void setup_wifi() {
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+}
+
+void loopSendStates(){
+  BaseType_t xStatus;
+  const TickType_t xTicksToWait = pdMS_TO_TICKS(10);
+  
+  Data data;
+  
+  // receive data from the queue
+  xStatus = xQueueReceive(xQueueSend, &data, xTicksToWait);
+    
+  // check whether receiving is ok or not 
+  if(xStatus == pdPASS){
+    StaticJsonBuffer<300> jsonBuffer;
+
+    JsonObject& root = jsonBuffer.createObject();
+    if(data.hasState == 1){
+      if(data.state == 1){
+        root["state"] = "ON";
+      } else {
+        // data.state == 0
+        root["state"] = "OFF";
+      }
+    }
+    if(data.hasColor == 1){
+      JsonObject& colorObject = root.createNestedObject("color");
+      colorObject["r"] = data.color_r;
+      colorObject["g"] = data.color_g;
+      colorObject["b"] = data.color_b;
+    }
+    if(data.hasBrightness == 1){
+      root["brightness"] = data.brightness;
+    }
+    if(data.hasEffect == 1){
+      root["effect"] = data.effect;
+    }
+
+    char mqtt_topic[200] = "";
+    strcat(mqtt_topic,"/");
+    strcat(mqtt_topic, hostname);
+    strcat(mqtt_topic, "/");
+
+    if(data.type == 1){
+      strcat(mqtt_topic, "ws281x/"); 
+    } else if(data.type == 2){
+      strcat(mqtt_topic, "switch/");
+    } else if(data.type == 2){
+      strcat(mqtt_topic, "binary_sensor/");
+    }
+    if(data.hasNumber == 1){
+      char str[16];
+      itoa(data.number, str, 10);
+      strcat(mqtt_topic, str);
+      strcat(mqtt_topic, "/");
+    }
+    strcat(mqtt_topic, "get");
+    
+    char buffer[200];
+    root.printTo(buffer);
+    Serial.print("[Comm-Thread] Sending to ");
+    Serial.print(mqtt_topic);
+    Serial.print(": ");
+    Serial.println(buffer);
+    client.publish(mqtt_topic, buffer);
+  }
 }
 
 void communicationTask(void * parameter)
@@ -200,6 +264,7 @@ void communicationTask(void * parameter)
   while(1) {
     client.loop();
     ArduinoOTA.handle();
+    loopSendStates();
   }
   
   vTaskDelete( NULL );
