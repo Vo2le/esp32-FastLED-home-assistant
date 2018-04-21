@@ -11,13 +11,14 @@ const char* ssid     = "";
 const char* password = "";
 
 /*
+ * Relays
+ */
+int relays[] = {19};
+
+/*
  * MQTT
  */
 const char* mqtt_server = "192.168.4.1";
-const char* mqtt_topics[2] = {
-  "/esp32/ws281x/0/set",
-  "/esp32/ws281x/1/set"};
-
 
 /*
  * FastLED

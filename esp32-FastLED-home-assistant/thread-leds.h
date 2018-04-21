@@ -114,7 +114,7 @@ void ledTask( void * parameter )
       }
       
       //beat
-      if(data.hasBeat == 1){
+      if(data.type == 4){
         if(strip_state->currentBrightness <= 235) {
           strip_state->newBrightness = strip_state->currentBrightness;
           strip_state->currentBrightness -= 10;
@@ -175,7 +175,7 @@ void ledTask( void * parameter )
         *(leds+pos) += strip_state->currentColor;
         *(leds+pos) %= strip_state->currentBrightness;
       } else if(strcmp(strip_state->effect,"confetti") == 0) {
-        fadeToBlackBy(leds, strip_state->count, 1);
+        fadeToBlackBy(leds, strip_state->count, 5);
         int pos = random16(strip_state->count);
         *(leds+pos) += CHSV(gHue + random8(64), 200, strip_state->currentBrightness);
       } else if(strcmp(strip_state->effect,"rainbow") == 0) {

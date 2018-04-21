@@ -18,6 +18,7 @@ struct Data {
   //  1: ws281x LEDs
   //  2: relay
   //  3: binary sensor
+  //  4: beat
   int type;
   int hasNumber;
   int number;
@@ -30,7 +31,6 @@ struct Data {
   int hasBrightness;
   int brightness;
   int hasEffect;
-  int hasBeat;
   char * effect;
 };
 

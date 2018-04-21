@@ -17,92 +17,168 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("[Comm-Thread] ");
   Serial.print(topic);
   Serial.print(": ");
-
+  char payloadBuffer[length];
+  memset(payloadBuffer, 0, length);
+  int i = 0;
+  while(i < length) {
+    //strcat(payloadBuffer, (char)payload[i]);
+    payloadBuffer[i] = payload[i];
+    Serial.print((char)payload[i]);
+    i++;
+  }
+  payloadBuffer[i] = '\0';
+  Serial.println("");
+  Serial.print(payloadBuffer);
+  Serial.println("");
   BaseType_t xStatus;
   const TickType_t xTicksToWait = pdMS_TO_TICKS(10);
   Data data;
-
-  StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
-  JsonObject& parsed = JSONBuffer.parseObject(payload);
-  parsed.printTo(Serial);
-  Serial.println("");
-
-  if (!parsed.success()) {
-    Serial.println("[Comm-Thread] Parsing failed!!!");
-    return;
-  }
 
   //char string[strlen(topic)];
   //strcpy(string, topic);
   char delimiter[] = "/";
   char *ptr;
 
-  data.hasNumber = 1;
-  strtok(topic, delimiter);
-  strtok(NULL, delimiter);
-  ptr = strtok(NULL, delimiter);
-  Serial.print("LED found: ");
-  Serial.println(ptr);
-  data.number = atoi(ptr);
-  Serial.print("As int: ");
-  Serial.println(data.number);
+  int occ = 0;
+  for(int m=0; topic[m]; m++) {
+    if(topic[m] != '/') {
+        occ++;
+    }
+  }
 
-  //state
-  if(parsed.containsKey("state")){
+  if(occ < 2){
+    Serial.print("[Comm-Thread] The mqtt topic does not contain enough slashes: 2 needed but ");
+    Serial.print(occ);
+    Serial.println(" found.");
+    return;
+  }
+  strtok(topic, delimiter);
+  char *type = strtok(NULL, delimiter);
+  Serial.print("[Comm-Thread] Message type: ");
+  Serial.println(type);
+
+  if(strcmp(type, "ws281x") == 0){
+    if(occ < 4){
+      Serial.println("[Comm-Thread] The mqtt topic does not contain enough slashes for led handling");
+      return;
+    }
+    // LED handling
+    data.type = 1;
+    ptr = strtok(NULL, delimiter);
+    data.hasNumber = 1;
+    data.number = atoi(ptr);
+
+    
+    StaticJsonBuffer<300> JSONBuffer;                         //Memory pool
+    JsonObject& parsed = JSONBuffer.parseObject(payload);
+    parsed.printTo(Serial);
+    Serial.println("");
+  
+    if (!parsed.success()) {
+      Serial.println("[Comm-Thread] Parsing failed!!!");
+      return;
+    }
+  
+    //state
+    if(parsed.containsKey("state")){
+      data.hasState = 1;
+      if(parsed["state"] == "ON"){
+        data.state = 1;
+      } else {
+        // OFF
+        data.state = 0;
+      }
+    } else {
+      data.hasState = 0;
+    }
+    
+    //color
+    if(parsed.containsKey("color")) {
+      data.color_r = parsed["color"]["r"];
+      data.color_g = parsed["color"]["g"];
+      data.color_b = parsed["color"]["b"];
+      
+      data.hasColor = 1;
+    } else {
+      data.hasColor = 0;
+    }
+    
+    //brightness
+    if(parsed.containsKey("brightness")) {
+      Serial.print("[Comm-Thread] New brightness: ");
+      data.brightness = parsed["brightness"];
+      Serial.println(data.brightness);
+      data.hasBrightness = 1;
+    } else {
+      data.hasBrightness = 0;
+    }
+    
+    //effect
+    if(parsed.containsKey("effect")) {
+      const char * tmpEffect = parsed["effect"];
+      char * effect = strdup(tmpEffect);
+      data.effect = (char *)malloc(32);
+
+      memcpy(data.effect, effect, strlen(effect));    
+      data.hasEffect = 1;
+    } else {
+      data.hasEffect = 0;
+    }
+    
+    /* send data to front of the queue */
+    xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
+  } else if(strcmp(type, "switch") == 0 || strcmp(type, "relay") == 0){
+    if(occ < 4){
+      Serial.println("[Comm-Thread] The mqtt topic does not contain enough slashes for relay handling. Exiting.");
+      return;
+    }
+    // relay handling
+    ptr = strtok(NULL, delimiter);
+    data.hasNumber = 1;
+    data.number = atoi(ptr);
+
+    if(data.number > sizeof(relays)/sizeof(int)){
+      Serial.println("[Comm-Thread] A relay should be switched, but there is no pin defined for this relay! Exiting.");
+      return;
+    }
+
+    data.type = 2;
     data.hasState = 1;
-    if(parsed["state"] == "ON"){
+    data.hasBrightness = 0;
+    data.hasColor = 0;
+    data.hasEffect = 0;
+    //state
+    Serial.print("[Comm-Thread] Turning relay ");
+    Serial.print(data.number);
+    Serial.print(" at pin ");
+    Serial.print(relays[data.number]);
+    Serial.print(" to ");
+    if(strcmp(payloadBuffer, "ON") == 0 || strcmp(payloadBuffer, "1") == 0 || strcmp(payloadBuffer, "on") == 0){
       data.state = 1;
+      digitalWrite(relays[data.number], HIGH);
+      Serial.println("ON");
     } else {
       // OFF
       data.state = 0;
+      digitalWrite(relays[data.number], LOW);
+      Serial.println("OFF");
     }
-  } else {
-    data.hasState = 0;
-  }
-  
-  //color
-  if(parsed.containsKey("color")) {
-    data.color_r = parsed["color"]["r"];
-    data.color_g = parsed["color"]["g"];
-    data.color_b = parsed["color"]["b"];
+
+    // send data to state reporting queue
+    xStatus = xQueueSendToFront(xQueueSend, &data, xTicksToWait);
+  } else if(strcmp(type, "beat") == 0){
+    data.type = 4;
     
-    data.hasColor = 1;
+    /* send data to front of the queue */
+    xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
   } else {
-    data.hasColor = 0;
-  }
-  
-  //brightness
-  if(parsed.containsKey("brightness")) {
-    Serial.print("[Comm-Thread] New brightness: ");
-    data.brightness = parsed["brightness"];
-    Serial.println(data.brightness);
-    data.hasBrightness = 1;
-  } else {
-    data.hasBrightness = 0;
+    Serial.print("[Comm-Thread] The mqtt topic '");
+    Serial.print(type);
+    Serial.println("' could not be matched to a subsystem");
   }
 
-  //beat
-  if(parsed.containsKey("beat")) {
-    Serial.println("[Comm-Thread] Beat detected");
-    data.hasBeat = 1;
-  } else {
-    data.hasBeat = 0;
-  }
-  
-  //effect
-  if(parsed.containsKey("effect")) {
-    const char * tmpEffect = parsed["effect"];
-    char * effect = strdup(tmpEffect);
-    data.effect = (char *)malloc(32);
-    memset(data.effect, 0, 32);
-    memcpy(data.effect, effect, strlen(effect));    
-    data.hasEffect = 1;
-  } else {
-    data.hasEffect = 0;
-  }
-  
-  /* send data to front of the queue */
-  xStatus = xQueueSendToFront( xQueue, &data, xTicksToWait );
+  // erase payload buffer
+  memset(payload, 0, sizeof(payload));
 }
 
 void reconnect() {
@@ -112,14 +188,44 @@ void reconnect() {
     // Create a random client ID
     String clientId = "ESP32Client-";
     clientId += String(random(0xffff), HEX);
+
+    Serial.println("");
+    Serial.print("Relay count: ");
+    Serial.println(sizeof(relays)/sizeof(int));
+    
     // Attempt to connect
     if (client.connect(clientId.c_str())) {
       Serial.println("connected");
       // ... and resubscribe
-      for(int i=0; i < STRIP_COUNT + 1; i++){
-        client.subscribe(mqtt_topics[i]);
+
+      char mqtt_topic[100];
+      for(int i = 0; i < STRIP_COUNT; i++){
+        memset(mqtt_topic, 0, sizeof(mqtt_topic));
+        strcat(mqtt_topic,"/");
+        strcat(mqtt_topic, hostname);
+        strcat(mqtt_topic, "/ws281x/"); 
+        char str[16];
+        itoa(i, str, 10);
+        strcat(mqtt_topic, str);
+        strcat(mqtt_topic, "/");
+        strcat(mqtt_topic, "set");
+        client.subscribe(mqtt_topic);
         Serial.print("Subscribed to mqtt topic: ");
-        Serial.println(mqtt_topics[i]);
+        Serial.println(mqtt_topic);
+      }
+      for(int i = 0; i < sizeof(relays)/sizeof(int); i++){
+        memset(mqtt_topic, 0, sizeof(mqtt_topic));
+        strcat(mqtt_topic,"/");
+        strcat(mqtt_topic, hostname);
+        strcat(mqtt_topic, "/switch/"); 
+        char str[16];
+        itoa(i, str, 10);
+        strcat(mqtt_topic, str);
+        strcat(mqtt_topic, "/");
+        strcat(mqtt_topic, "set");
+        client.subscribe(mqtt_topic);
+        Serial.print("Subscribed to mqtt topic: ");
+        Serial.println(mqtt_topic);
       }
     } else {
       Serial.print("failed, rc=");
@@ -259,6 +365,14 @@ void communicationTask(void * parameter)
   /* keep the status of sending data */
   if (!client.connected()) {
     reconnect();
+  }
+
+  // initialization of relay pins
+  for(int i = 0; i < sizeof(relays)/sizeof(int); i++){
+    pinMode(relays[i], OUTPUT);
+    Serial.print("[Comm-Thread] Initialized pin ");
+    Serial.print(relays[i]);
+    Serial.println(" as OUTPUT");
   }
 
   while(1) {
